@@ -1,0 +1,137 @@
+name: Release programs
+
+on:
+  push:
+    tags:
+      - "*"
+
+permissions:
+  contents: write
+
+env:
+  CROSS_VERSION: 0.2.5
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            cross-rs: true
+            target: x86_64-unknown-linux-musl
+            dylib-ext: so
+            suffix: linux-amd64
+          - os: ubuntu-latest
+            cross-rs: true
+            target: aarch64-unknown-linux-musl
+            dylib-ext: so
+            suffix: linux-arm64
+
+    steps:
+      - name: Checkout solana-labs/solana repository at current tag
+        uses: actions/checkout@v2
+        with:
+          repository: solana-labs/solana
+          ref: ${{ github.ref }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.69.0
+
+      - uses: Swatinem/rust-cache@v2
+      
+      - name: Install cross-rs
+        if: matrix.cross-rs == true
+        uses: supplypike/setup-bin@v3
+        with:
+          uri: "https://github.com/cross-rs/cross/releases/download/v${{ env.CROSS_VERSION }}/cross-x86_64-unknown-linux-musl.tar.gz"
+          name: "cross"
+          version: "${{ env.CROSS_VERSION }}"
+
+      - name: Install cross-compilation toolchains
+        if: matrix.cross-rs == false
+        uses: taiki-e/setup-cross-toolchain-action@v1
+        with:
+          target: ${{ matrix.target }}
+
+      - name: Build
+        if: matrix.cross == true
+        run: |
+          cross build --release --target ${{ matrix.target }}
+
+      - name: Build
+        if: matrix.cross-rs == false
+        run: |
+          cargo build --release --target ${{ matrix.target }}
+
+      - name: Archive binaries
+        run: |
+          pushd target/${{ matrix.target }}/release
+          tar -czf \
+            ../../../solana-${{ matrix.suffix }}.tar.gz \
+            cargo-build-bpf \
+            cargo-build-sbf \
+            cargo-test-bpf \
+            cargo-test-sbf \
+            gen-headers \
+            gen-syscall-list \
+            proto \
+            rbpf-cli \
+            solana \
+            solana-accounts-bench \
+            solana-accounts-cluster-bench \
+            solana-banking-bench \
+            solana-bench-streamer \
+            solana-bench-tps \
+            solana-dos \
+            solana-faucet \
+            solana-genesis \
+            solana-gossip \
+            solana-install \
+            solana-install-init \
+            solana-ip-address \
+            solana-ip-address-server \
+            solana-keygen \
+            solana-ledger-tool \
+            solana-log-analyzer \
+            solana-merkle-root-bench \
+            solana-net-shaper \
+            solana-poh-bench \
+            solana-stake-accounts \
+            solana-sys-tuner \
+            solana-test-validator \
+            solana-tokens \
+            solana-transaction-dos \
+            solana-upload-perf \
+            solana-validator \
+            solana-watchtower
+          popd
+
+      - name: Archive Solana library deps
+        run: |
+          pushd target/${{ matrix.target }}/release
+          tar -czf \
+            ../../../solana-deps-${{ matrix.suffix }}.tar.gz \
+            libsolana_program.${{ matrix.dylib-ext }} \
+            libsolana_program.rlib \
+            libsolana_sdk.${{ matrix.dylib-ext }} \
+            libsolana_sdk.rlib \
+            libsolana_zk_token_sdk.${{ matrix.dylib-ext }} \
+            libsolana_zk_token_sdk.rlib
+          popd
+
+      - name: Archive SBF SDK
+        run: |
+          tar -czf \
+            solana-sdk-sbf-${{ matrix.suffix }}.tar.gz \
+            sdk/sbf
+
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          token: ${{ secrets.PAT_TOKEN }}
+          files: |
+            solana-${{ matrix.suffix }}.tar.gz
+            solana-sdk-sbf-${{ matrix.suffix }}.tar.gz
+            solana-deps-${{ matrix.suffix }}.tar.gz
